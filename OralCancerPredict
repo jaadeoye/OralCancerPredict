@@ -1,0 +1,76 @@
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+from sklearn import set_config
+from sklearn.model_selection import train_test_split
+from sksurv.ensemble import RandomSurvivalForest
+from sksurv.preprocessing import OneHotEncoder
+from sksurv.util import Surv
+from sksurv.metrics import integrated_brier_score
+from sksurv.ensemble import GradientBoostingSurvivalAnalysis
+
+set_config(display="text")
+
+
+xls = pd.ExcelFile('[PATH]')
+df_train = pd.read_excel(xls, 'Train')
+df_test = pd.read_excel(xls, 'Test')
+features = ['age','KRT13', 'p53', 'sex', 'risk habits', 'previous cancer', 'Tongue/FOM',
+              'Buccal/Labial', 'Retromolar', 'Gingiva', 'Hard Palate',
+              'number of lesions', 'homogeneity', 'Induration', 'dysplasia']
+
+x = df_train[features]
+y = Surv.from_dataframe("MT", "time", df_train)
+
+a = df_test[features]
+b = Surv.from_dataframe("MT", "time", df_test)
+
+gba = GradientBoostingSurvivalAnalysis(
+    n_estimators=45, learning_rate=1.0, max_depth=1,random_state=0
+)
+gba.fit(x, y)
+
+c_index = gba.score(a, b)
+print(f"{c_index:.5f}")
+
+c=pd.Series(gba.predict(a))
+c=pd.DataFrame(c)
+c.to_excel('~/Desktop/c.xlsx')
+
+pd.Series(gba.predict(a))
+
+survs = gba.predict_survival_function(x)
+times = np.arange(6, 272)
+preds = np.asarray([[fn(t) for t in times] for fn in survs])
+
+score = integrated_brier_score(y, y, preds, times)
+print(f"{score:.5f}")
+
+surv2 = gba.predict_survival_function(a, return_array=True)
+surv = gba.predict_survival_function(a)
+times = np.arange(6, 272)
+surv_prob_df = pd.DataFrame(index=times)
+for i, surv_func in enumerate(surv):
+    surv_prob_df[f'Patient_{i}'] = [surv_func(t) for t in times]
+surv_prob_df.to_excel('[PATH]')
+
+for i, s in enumerate(surv2):
+    plt.step(gba.unique_times_, s, where="post", label=str(i))
+plt.ylabel("Survival probability")
+plt.xlabel("Time in months")
+plt.ylim(0, 1)
+plt.legend()
+ax = plt.gca()
+
+# Remove the top and right spines
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
+#plt.show()
+
+#shap
+import shap
+shap.initjs()
+explainer = shap.Explainer(gba.predict, x)
+shap_values = explainer(a)
+shap.summary_plot(shap_values, a)
